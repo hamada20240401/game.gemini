@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Siamese Cat Stroll 3D</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: #B2F0F5; /* ポップな空の色 */
+        }
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #555;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px 25px;
+            border-radius: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            pointer-events: none;
+            user-select: none;
+        }
+        h1 {
+            margin: 0 0 5px 0;
+            font-size: 1.5rem;
+            color: #FF7E79;
+        }
+        p { margin: 0; font-size: 0.9rem; }
+        .key {
+            display: inline-block;
+            background: #eee;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 0.8rem;
+            margin: 0 2px;
+            font-weight: bold;
+        }
+        #interaction-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 3rem;
+            font-weight: bold;
+            color: #FF3B30;
+            text-shadow: 2px 2px 0 #FFF;
+            opacity: 0;
+            transition: opacity 0.2s, transform 0.2s;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        #interaction-msg.show {
+            opacity: 1;
+            transform: translate(-50%, -60%) scale(1.2);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-container">
+        <h1>🐾 シャム猫さんぽ</h1>
+        <p>操作: <span class="key">←</span> <span class="key">↑</span> <span class="key">↓</span> <span class="key">→</span> またはマウスドラッグ</p>
+        <p>他の猫に近づくと...？</p>
+    </div>
+
+    <div id="interaction-msg">シャーッ！！💢</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 設定 ---
+        const COLORS = {
+            sky: 0xB2F0F5,
+            ground: 0xFFF8E7, // クリーム色
+            building: [0xFFDAC1, 0xE2F0CB, 0xB5EAD7, 0xC7CEEA], // パステルカラー
+            siameseBody: 0xE6D2B5, // シャム猫の体
+            siamesePoint: 0x4B3621, // シャム猫の焦げ茶ポイント
+            catColors: [0xFFA07A, 0x808080, 0x000000, 0xFFD700] // 他の猫の色
+        };
+
+        // --- シーンのセットアップ ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(COLORS.sky);
+        scene.fog = new THREE.Fog(COLORS.sky, 20, 60);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 10, 15);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.SoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- ライト ---
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 30;
+        dirLight.shadow.camera.bottom = -30;
+        dirLight.shadow.camera.left = -30;
+        dirLight.shadow.camera.right = 30;
+        scene.add(dirLight);
+
+        // --- 地面 ---
+        const groundGeo = new THREE.PlaneGeometry(200, 200);
+        const groundMat = new THREE.MeshStandardMaterial({ color: COLORS.ground });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // --- オブジェクト生成関数: 猫 ---
+        function createCat(isPlayer = false, colorOverride = null) {
+            const catGroup = new THREE.Group();
+
+            // 色の設定（シャム猫か、ランダムな野良猫か）
+            const bodyColor = isPlayer ? COLORS.siameseBody : (colorOverride || 0x888888);
+            const pointColor = isPlayer ? COLORS.siamesePoint : bodyColor; // 野良猫は単色
+
+            const materialBody = new THREE.MeshStandardMaterial({ color: bodyColor });
+            const materialPoint = new THREE.MeshStandardMaterial({ color: pointColor });
+
+            // 体
+            const bodyGeo = new THREE.CapsuleGeometry(0.6, 1.2, 4, 8);
+            const body = new THREE.Mesh(bodyGeo, materialBody);
+            body.rotation.z = Math.PI / 2;
+            body.position.y = 0.8;
+            body.castShadow = true;
+            catGroup.add(body);
+
+            // 頭
+            const headGeo = new THREE.SphereGeometry(0.7, 16, 16);
+            const head = new THREE.Mesh(headGeo, isPlayer ? materialBody : materialBody); // シャム猫の頭は体と同じ
+            head.position.set(0.9, 1.4, 0);
+            head.castShadow = true;
+            catGroup.add(head);
+
+            // 耳 (左)
+            const earGeo = new THREE.ConeGeometry(0.25, 0.5, 8);
+            const earL = new THREE.Mesh(earGeo, materialPoint);
+            earL.position.set(0.9, 2.0, 0.3);
+            earL.rotation.z = -0.2;
+            earL.rotation.x = 0.2;
+            catGroup.add(earL);
+
+            // 耳 (右)
+            const earR = new THREE.Mesh(earGeo, materialPoint);
+            earR.position.set(0.9, 2.0, -0.3);
+            earR.rotation.z = -0.2;
+            earR.rotation.x = -0.2;
+            catGroup.add(earR);
+
+            // 顔（シャム猫の顔の中心を黒くする表現は簡易的に鼻先で代用）
+            if(isPlayer) {
+                const faceMaskGeo = new THREE.SphereGeometry(0.5, 16, 16);
+                const faceMask = new THREE.Mesh(faceMaskGeo, materialPoint);
+                faceMask.position.set(1.15, 1.4, 0);
+                faceMask.scale.set(0.5, 0.8, 0.8);
+                catGroup.add(faceMask);
+            }
+
+            // 尻尾
+            const tailGeo = new THREE.CylinderGeometry(0.1, 0.15, 1.5, 8);
+            const tail = new THREE.Mesh(tailGeo, materialPoint);
+            tail.position.set(-1.0, 1.2, 0);
+            tail.rotation.z = 0.8;
+            catGroup.add(tail);
+            
+            // アニメーション用プロパティ
+            catGroup.userData = {
+                velocity: new THREE.Vector3(),
+                direction: new THREE.Vector3(1, 0, 0),
+                isHissing: false,
+                hissTimer: 0,
+                baseY: 0,
+                hopOffset: 0
+            };
+
+            return catGroup;
+        }
+
+        // --- オブジェクト生成関数: 建物 ---
+        function createCity() {
+            const cityGroup = new THREE.Group();
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            
+            for (let i = 0; i < 40; i++) {
+                const color = COLORS.building[Math.floor(Math.random() * COLORS.building.length)];
+                const material = new THREE.MeshStandardMaterial({ color: color });
+                const mesh = new THREE.Mesh(geometry, material);
+
+                // ランダムなサイズと位置
+                const h = 2 + Math.random() * 6;
+                const w = 2 + Math.random() * 3;
+                const d = 2 + Math.random() * 3;
+                
+                mesh.scale.set(w, h, d);
+                
+                // 中心（0,0）付近は避ける
+                let x = (Math.random() - 0.5) * 80;
+                let z = (Math.random() - 0.5) * 80;
+                if (Math.abs(x) < 5 && Math.abs(z) < 5) x += 10;
+
+                mesh.position.set(x, h/2, z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                cityGroup.add(mesh);
+            }
+            return cityGroup;
+        }
+
+        // --- ゲームの初期化 ---
+        const city = createCity();
+        scene.add(city);
+
+        // 主人公（シャム猫）
+        const player = createCat(true);
+        scene.add(player);
+
+        // 他の猫たち
+        const npcs = [];
+        for(let i=0; i<8; i++) {
+            const color = COLORS.catColors[i % COLORS.catColors.length];
+            const npc = createCat(false, color);
+            // ランダム配置
+            npc.position.set(
+                (Math.random() - 0.5) * 60,
+                0,
+                (Math.random() - 0.5) * 60
+            );
+            // ランダムな向き
+            npc.rotation.y = Math.random() * Math.PI * 2;
+            
+            scene.add(npc);
+            npcs.push(npc);
+        }
+
+        // --- 操作系 ---
+        const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, w:false, a:false, s:false, d:false };
+        
+        window.addEventListener('keydown', (e) => {
+            if(keys.hasOwnProperty(e.key)) keys[e.key] = true;
+            if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            if(keys.hasOwnProperty(e.key)) keys[e.key] = false;
+            if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false;
+        });
+
+        // カメラコントロール（マウス操作用）
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 5;
+        controls.maxDistance = 30;
+        controls.maxPolarAngle = Math.PI / 2 - 0.1; // 地面より下に行かない
+
+        // UI要素
+        const msgEl = document.getElementById('interaction-msg');
+
+        // --- ゲームループ ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
+
+            // 1. プレイヤーの移動処理
+            const speed = 8 * delta;
+            const turnSpeed = 4 * delta;
+            let moving = false;
+
+            if (keys.ArrowUp || keys.w) {
+                player.translateX(speed);
+                moving = true;
+            }
+            if (keys.ArrowDown || keys.s) {
+                player.translateX(-speed * 0.6);
+                moving = true;
+            }
+            if (keys.ArrowLeft || keys.a) {
+                player.rotation.y += turnSpeed;
+            }
+            if (keys.ArrowRight || keys.d) {
+                player.rotation.y -= turnSpeed;
+            }
+
+            // 歩行アニメーション（ぴょこぴょこ跳ねる）
+            if (moving) {
+                player.position.y = Math.abs(Math.sin(time * 10)) * 0.3;
+            } else {
+                player.position.y = 0;
+            }
+
+            // 2. カメラ追従
+            // カメラはプレイヤーの後ろ上方にスムーズに追従させる簡易実装
+            const relativeCameraOffset = new THREE.Vector3(-8, 5, 0); // プレイヤーの背後
+            const cameraOffset = relativeCameraOffset.applyMatrix4(player.matrixWorld);
+            
+            // OrbitControlsを使っている場合、targetをプレイヤーにする
+            controls.target.lerp(player.position, 0.1);
+            controls.update();
+
+
+            // 3. NPCの動きと衝突判定
+            let interactionHappened = false;
+
+            npcs.forEach(npc => {
+                // 威嚇中は動かない
+                if (npc.userData.isHissing) {
+                    npc.userData.hissTimer -= delta;
+                    
+                    // 威嚇の動き（振動）
+                    npc.rotation.z = Math.sin(time * 30) * 0.1;
+                    npc.scale.setScalar(1.2); // 大きくなる
+
+                    if (npc.userData.hissTimer <= 0) {
+                        npc.userData.isHissing = false;
+                        npc.scale.setScalar(1);
+                        npc.rotation.z = 0;
+                    }
+                } else {
+                    // 通常移動（ランダムウォーク）
+                    npc.translateX(2 * delta);
+                    
+                    // 時々向きを変える
+                    if (Math.random() < 0.02) {
+                        npc.rotation.y += (Math.random() - 0.5) * 2;
+                    }
+
+                    // 壁（原点からの距離）に行き過ぎたら戻る
+                    if (npc.position.length() > 40) {
+                        npc.lookAt(0,0,0);
+                    }
+                }
+
+                // 衝突判定（距離チェック）
+                const dist = player.position.distanceTo(npc.position);
+                if (dist < 3.5 && !npc.userData.isHissing) {
+                    // 威嚇開始
+                    npc.userData.isHissing = true;
+                    npc.userData.hissTimer = 1.5; // 1.5秒間威嚇
+                    
+                    // プレイヤーの方を向く
+                    npc.lookAt(player.position.x, player.position.y, player.position.z);
+                    
+                    interactionHappened = true;
+                }
+            });
+
+            // UI表示更新
+            if (interactionHappened) {
+                msgEl.classList.add('show');
+                // 数秒後に消す処理はCSS transitionとJSのタイマー管理が必要だが
+                // ここでは単純にヒットした瞬間だけクラスをつける（連続ヒットで維持される）
+                clearTimeout(window.hideMsgTimer);
+                window.hideMsgTimer = setTimeout(() => {
+                    msgEl.classList.remove('show');
+                }, 1000);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // リサイズ対応
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
